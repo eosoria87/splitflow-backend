@@ -55,9 +55,21 @@ app.use((req, res) => {
 
 // Global Error Handler
 app.use((err, req, res, next) => {
+  const ApiError = require('./utils/ApiError');
+  
   console.error('Error:', err);
   
-  res.status(err.status || 500).json({
+  // Handle ApiError instances
+  if (err instanceof ApiError) {
+    return res.status(err.statusCode).json({
+      error: err.message,
+      timestamp: err.timestamp,
+      ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    });
+  }
+  
+  // Handle other errors
+  res.status(500).json({
     error: process.env.NODE_ENV === 'production' 
       ? 'Internal server error' 
       : err.message,
