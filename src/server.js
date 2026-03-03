@@ -2,33 +2,34 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-// Initialize Express app
 const app = express();
 
-// Middleware Configuration
-const configureMiddleware = (app) => {
-  // CORS - Allow frontend to call backend
-  app.use(cors({
-    origin: process.env.NODE_ENV === 'production' 
-      ? process.env.FRONTEND_URL 
-      : 'http://localhost:3000',
-    credentials: true
-  }));
+// ========================================
+// MIDDLEWARE
+// ========================================
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? process.env.FRONTEND_URL 
+    : 'http://localhost:3000',
+  credentials: true
+}));
 
-  // Body parsing
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-  // Request logging (development only)
-  if (process.env.NODE_ENV === 'development') {
-    app.use((req, res, next) => {
-      console.log(`${req.method} ${req.path}`);
-      next();
-    });
-  }
-};
+// Request logging (development only)
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
+  });
+}
 
-// Health check endpoint
+// ========================================
+// ROUTES
+// ========================================
+
+// Health check
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
@@ -37,13 +38,21 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes (we'll add these next)
+// API root
 app.get('/api', (req, res) => {
   res.json({ 
-    message: 'Splitflow API',
+    message: 'SplitFlow API',
     version: '1.0.0'
   });
 });
+
+// Auth routes
+const authRoutes = require('./routes/auth.routes');
+app.use('/api/auth', authRoutes);
+
+// ========================================
+// ERROR HANDLERS
+// ========================================
 
 // 404 Handler
 app.use((req, res) => {
@@ -54,12 +63,11 @@ app.use((req, res) => {
 });
 
 // Global Error Handler
+const ApiError = require('./utils/ApiError');
+
 app.use((err, req, res, next) => {
-  const ApiError = require('./utils/ApiError');
-  
   console.error('Error:', err);
   
-  // Handle ApiError instances
   if (err instanceof ApiError) {
     return res.status(err.statusCode).json({
       error: err.message,
@@ -68,7 +76,6 @@ app.use((err, req, res, next) => {
     });
   }
   
-  // Handle other errors
   res.status(500).json({
     error: process.env.NODE_ENV === 'production' 
       ? 'Internal server error' 
@@ -77,25 +84,15 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Configure middleware
-configureMiddleware(app);
-
-// Start server
+// ========================================
+// START SERVER
+// ========================================
 const PORT = process.env.PORT || 3001;
 
-const startServer = () => {
-  try {
-    app.listen(PORT, () => {
-      console.log(`🚀 Splitflow API running on port ${PORT}`);
-      console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-};
-
-startServer();
+app.listen(PORT, () => {
+  console.log(`🚀 SplitFlow API running on port ${PORT}`);
+  console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+});
 
 module.exports = app;
