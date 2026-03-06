@@ -30,7 +30,7 @@ static async createGroup(req, res, next) {
     }
 
     // Optional: Validate category
-    const validCategories = ['travel', 'home', 'dining', 'other'];
+    const validCategories = ['travel', 'home', 'couple', 'friends', 'other'];
     if (category && !validCategories.includes(category)) {
       throw ApiError.badRequest(`Category must be one of: ${validCategories.join(', ')}`);
     }
@@ -249,7 +249,7 @@ static async getGroup(req, res, next) {
   }
 }
 
-  /**
+/**
  * Update group details
  * PUT /api/groups/:groupId
  * Only owner can update
@@ -270,14 +270,27 @@ static async updateGroup(req, res, next) {
     }
 
     // Optional: Validate category
-    const validCategories = ['trip', 'home', 'couple', 'friends', 'other'];
+    const validCategories = ['travel', 'home', 'couple', 'friends', 'other'];
     if (category && !validCategories.includes(category)) {
       throw ApiError.badRequest(`Category must be one of: ${validCategories.join(', ')}`);
     }
 
+    // Use service role to bypass RLS
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
 
     // Check if user is owner
-    const { data: membership } = await supabase
+    const { data: membership } = await supabaseAdmin
       .from('group_members')
       .select('role')
       .eq('group_id', groupId)
@@ -289,7 +302,7 @@ static async updateGroup(req, res, next) {
     }
 
     // Update group
-    const { data: updatedGroup, error } = await supabase
+    const { data: updatedGroup, error } = await supabaseAdmin
       .from('groups')
       .update({
         name: name.trim(),
@@ -315,52 +328,66 @@ static async updateGroup(req, res, next) {
 }
 
   /**
-   * Delete a group
-   * DELETE /api/groups/:groupId
-   * Only owner can delete
-   */
-  static async deleteGroup(req, res, next) {
-    try {
-      const { groupId } = req.params;
-      const userId = req.user.id;
+ * Delete a group
+ * DELETE /api/groups/:groupId
+ * Only owner can delete
+ */
+static async deleteGroup(req, res, next) {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
 
-      // Check if user is owner
-      const { data: membership } = await supabase
-        .from('group_members')
-        .select('role')
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-        .single();
-
-      if (!membership || membership.role !== 'owner') {
-        throw ApiError.forbidden('Only group owner can delete the group');
+    // Use service role to bypass RLS
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
       }
+    );
 
-      // Delete group (cascade will delete group_members)
-      const { error } = await supabase
-        .from('groups')
-        .delete()
-        .eq('id', groupId);
+    // Check if user is owner
+    const { data: membership } = await supabaseAdmin
+      .from('group_members')
+      .select('role')
+      .eq('group_id', groupId)
+      .eq('user_id', userId)
+      .single();
 
-      if (error) {
-        console.error('Failed to delete group:', error);
-        throw ApiError.internal('Failed to delete group');
-      }
-
-      res.status(200).json({
-        message: 'Group deleted successfully'
-      });
-    } catch (error) {
-      next(error);
+    if (!membership || membership.role !== 'owner') {
+      throw ApiError.forbidden('Only group owner can delete the group');
     }
-  }
 
-  /**
-   * Add member to group
-   * POST /api/groups/:groupId/members
-   * Only owner can add members
-   */
-  static async addMember(req, res, next) {
+    // Delete group (cascade will delete group_members)
+    const { error } = await supabaseAdmin
+      .from('groups')
+      .delete()
+      .eq('id', groupId);
+
+    if (error) {
+      console.error('Failed to delete group:', error);
+      throw ApiError.internal('Failed to delete group');
+    }
+
+    res.status(200).json({
+      message: 'Group deleted successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Add member to group
+ * POST /api/groups/:groupId/members
+ * Only owner can add members
+ */
+static async addMember(req, res, next) {
   try {
     const { groupId } = req.params;
     const { userId: newUserId, email } = req.body;
@@ -371,8 +398,22 @@ static async updateGroup(req, res, next) {
       throw ApiError.badRequest('User ID or email is required');
     }
 
+    // Use service role to bypass RLS
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
+
     // Check if current user is owner
-    const { data: membership } = await supabase
+    const { data: membership } = await supabaseAdmin
       .from('group_members')
       .select('role')
       .eq('group_id', groupId)
@@ -386,7 +427,7 @@ static async updateGroup(req, res, next) {
     // If email provided, find user by email
     let targetUserId = newUserId;
     if (email && !newUserId) {
-      const { data: profile } = await supabase
+      const { data: profile } = await supabaseAdmin
         .from('profiles')
         .select('id')
         .eq('email', email)
@@ -400,7 +441,7 @@ static async updateGroup(req, res, next) {
     }
 
     // Check if user is already a member
-    const { data: existingMember } = await supabase
+    const { data: existingMember } = await supabaseAdmin
       .from('group_members')
       .select('id')
       .eq('group_id', groupId)
@@ -410,20 +451,6 @@ static async updateGroup(req, res, next) {
     if (existingMember) {
       throw ApiError.badRequest('User is already a member of this group');
     }
-
-    // Use service role to add member
-    const { createClient } = require('@supabase/supabase-js');
-    
-    const supabaseAdmin = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    );
 
     // Add member using admin client
     const { data: newMember, error } = await supabaseAdmin
@@ -451,51 +478,65 @@ static async updateGroup(req, res, next) {
 }
 
   /**
-   * Remove member from group
-   * DELETE /api/groups/:groupId/members/:userId
-   * Only owner can remove members
-   */
-  static async removeMember(req, res, next) {
-    try {
-      const { groupId, userId: targetUserId } = req.params;
-      const currentUserId = req.user.id;
+ * Remove member from group
+ * DELETE /api/groups/:groupId/members/:userId
+ * Only owner can remove members
+ */
+static async removeMember(req, res, next) {
+  try {
+    const { groupId, userId: targetUserId } = req.params;
+    const currentUserId = req.user.id;
 
-      // Check if current user is owner
-      const { data: membership } = await supabase
-        .from('group_members')
-        .select('role')
-        .eq('group_id', groupId)
-        .eq('user_id', currentUserId)
-        .single();
-
-      if (!membership || membership.role !== 'owner') {
-        throw ApiError.forbidden('Only group owner can remove members');
+    // Use service role to bypass RLS
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
       }
+    );
 
-      // Cannot remove yourself (owner)
-      if (targetUserId === currentUserId) {
-        throw ApiError.badRequest('Cannot remove yourself from the group');
-      }
+    // Check if current user is owner
+    const { data: membership } = await supabaseAdmin
+      .from('group_members')
+      .select('role')
+      .eq('group_id', groupId)
+      .eq('user_id', currentUserId)
+      .single();
 
-      // Remove member
-      const { error } = await supabase
-        .from('group_members')
-        .delete()
-        .eq('group_id', groupId)
-        .eq('user_id', targetUserId);
-
-      if (error) {
-        console.error('Failed to remove member:', error);
-        throw ApiError.internal('Failed to remove member');
-      }
-
-      res.status(200).json({
-        message: 'Member removed successfully'
-      });
-    } catch (error) {
-      next(error);
+    if (!membership || membership.role !== 'owner') {
+      throw ApiError.forbidden('Only group owner can remove members');
     }
+
+    // Cannot remove yourself (owner)
+    if (targetUserId === currentUserId) {
+      throw ApiError.badRequest('Cannot remove yourself from the group');
+    }
+
+    // Remove member
+    const { error } = await supabaseAdmin
+      .from('group_members')
+      .delete()
+      .eq('group_id', groupId)
+      .eq('user_id', targetUserId);
+
+    if (error) {
+      console.error('Failed to remove member:', error);
+      throw ApiError.internal('Failed to remove member');
+    }
+
+    res.status(200).json({
+      message: 'Member removed successfully'
+    });
+  } catch (error) {
+    next(error);
   }
+}
 }
 
 module.exports = GroupController;
