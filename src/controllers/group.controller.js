@@ -108,8 +108,22 @@ static async createGroup(req, res, next) {
     try {
       const userId = req.user.id;
 
+      // Use service role to bypass RLS
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
+
       // Get all groups where user is a member
-      const { data: memberships, error } = await supabase
+      const { data: memberships, error } = await supabaseAdmin
         .from('group_members')
         .select(`
           role,
@@ -153,73 +167,87 @@ static async createGroup(req, res, next) {
   }
 
   /**
-   * Get a specific group by ID
-   * GET /api/groups/:groupId
-   */
-  static async getGroup(req, res, next) {
-    try {
-      const { groupId } = req.params;
-      const userId = req.user.id;
+ * Get a specific group by ID
+ * GET /api/groups/:groupId
+ */
+static async getGroup(req, res, next) {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
 
-      // Get group details
-      const { data: group, error: groupError } = await supabase
-        .from('groups')
-        .select('*')
-        .eq('id', groupId)
-        .single();
-
-      if (groupError || !group) {
-        throw ApiError.notFound('Group not found');
-      }
-
-      // Get user's role in the group
-      const { data: membership, error: memberError } = await supabase
-        .from('group_members')
-        .select('role')
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-        .single();
-
-      if (memberError || !membership) {
-        throw ApiError.forbidden('You are not a member of this group');
-      }
-
-      // Get all members
-      const { data: members, error: membersError } = await supabase
-        .from('group_members')
-        .select(`
-          user_id,
-          role,
-          joined_at,
-          profiles (
-            name,
-            email
-          )
-        `)
-        .eq('group_id', groupId)
-        .order('joined_at', { ascending: true });
-
-      if (membersError) {
-        console.error('Failed to fetch members:', membersError);
-      }
-
-      res.status(200).json({
-        group: {
-          ...group,
-          userRole: membership.role,
-          members: members?.map(m => ({
-            user_id: m.user_id,
-            role: m.role,
-            joined_at: m.joined_at,
-            name: m.profiles?.name,
-            email: m.profiles?.email
-          })) || []
+    // Use service role to bypass RLS
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
         }
-      });
-    } catch (error) {
-      next(error);
+      }
+    );
+
+    // Get group details
+    const { data: group, error: groupError } = await supabaseAdmin
+      .from('groups')
+      .select('*')
+      .eq('id', groupId)
+      .single();
+
+    if (groupError || !group) {
+      throw ApiError.notFound('Group not found');
     }
+
+    // Get user's role in the group
+    const { data: membership, error: memberError } = await supabaseAdmin
+      .from('group_members')
+      .select('role')
+      .eq('group_id', groupId)
+      .eq('user_id', userId)
+      .single();
+
+    if (memberError || !membership) {
+      throw ApiError.forbidden('You are not a member of this group');
+    }
+
+    // Get all members
+    const { data: members, error: membersError } = await supabaseAdmin
+      .from('group_members')
+      .select(`
+        user_id,
+        role,
+        joined_at,
+        profiles (
+          name,
+          email
+        )
+      `)
+      .eq('group_id', groupId)
+      .order('joined_at', { ascending: true });
+
+    if (membersError) {
+      console.error('Failed to fetch members:', membersError);
+    }
+
+    res.status(200).json({
+      group: {
+        ...group,
+        userRole: membership.role,
+        members: members?.map(m => ({
+          user_id: m.user_id,
+          role: m.role,
+          joined_at: m.joined_at,
+          name: m.profiles?.name,
+          email: m.profiles?.email
+        })) || []
+      }
+    });
+  } catch (error) {
+    next(error);
   }
+}
 
   /**
  * Update group details
