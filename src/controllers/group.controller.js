@@ -30,14 +30,27 @@ static async createGroup(req, res, next) {
     }
 
     // Optional: Validate category
-    const validCategories = ['trip', 'home', 'couple', 'friends', 'other'];
+    const validCategories = ['travel', 'home', 'dining', 'other'];
     if (category && !validCategories.includes(category)) {
       throw ApiError.badRequest(`Category must be one of: ${validCategories.join(', ')}`);
     }
 
+    // Use service role client for admin operations
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
 
-    // Create group
-    const { data: group, error: groupError } = await supabase
+    // Create group using admin client
+    const { data: group, error: groupError } = await supabaseAdmin
       .from('groups')
       .insert({
         name: name.trim(),
@@ -53,8 +66,8 @@ static async createGroup(req, res, next) {
       throw ApiError.internal('Failed to create group');
     }
 
-    // Add creator as owner in group_members
-    const { error: memberError } = await supabase
+    // Add creator as owner using admin client
+    const { error: memberError } = await supabaseAdmin
       .from('group_members')
       .insert({
         group_id: group.id,
@@ -65,7 +78,7 @@ static async createGroup(req, res, next) {
     if (memberError) {
       console.error('Failed to add creator as member:', memberError);
       // Rollback: delete the group
-      await supabase.from('groups').delete().eq('id', group.id);
+      await supabaseAdmin.from('groups').delete().eq('id', group.id);
       throw ApiError.internal('Failed to create group');
     }
 
@@ -320,80 +333,94 @@ static async updateGroup(req, res, next) {
    * Only owner can add members
    */
   static async addMember(req, res, next) {
-    try {
-      const { groupId } = req.params;
-      const { userId: newUserId, email } = req.body;
-      const currentUserId = req.user.id;
+  try {
+    const { groupId } = req.params;
+    const { userId: newUserId, email } = req.body;
+    const currentUserId = req.user.id;
 
-      // Must provide either userId or email
-      if (!newUserId && !email) {
-        throw ApiError.badRequest('User ID or email is required');
-      }
-
-      // Check if current user is owner
-      const { data: membership } = await supabase
-        .from('group_members')
-        .select('role')
-        .eq('group_id', groupId)
-        .eq('user_id', currentUserId)
-        .single();
-
-      if (!membership || membership.role !== 'owner') {
-        throw ApiError.forbidden('Only group owner can add members');
-      }
-
-      // If email provided, find user by email
-      let targetUserId = newUserId;
-      if (email && !newUserId) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('email', email)
-          .single();
-
-        if (!profile) {
-          throw ApiError.notFound('User with that email not found');
-        }
-
-        targetUserId = profile.id;
-      }
-
-      // Check if user is already a member
-      const { data: existingMember } = await supabase
-        .from('group_members')
-        .select('id')
-        .eq('group_id', groupId)
-        .eq('user_id', targetUserId)
-        .single();
-
-      if (existingMember) {
-        throw ApiError.badRequest('User is already a member of this group');
-      }
-
-      // Add member
-      const { data: newMember, error } = await supabase
-        .from('group_members')
-        .insert({
-          group_id: groupId,
-          user_id: targetUserId,
-          role: 'member'
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Failed to add member:', error);
-        throw ApiError.internal('Failed to add member');
-      }
-
-      res.status(201).json({
-        message: 'Member added successfully',
-        member: newMember
-      });
-    } catch (error) {
-      next(error);
+    // Must provide either userId or email
+    if (!newUserId && !email) {
+      throw ApiError.badRequest('User ID or email is required');
     }
+
+    // Check if current user is owner
+    const { data: membership } = await supabase
+      .from('group_members')
+      .select('role')
+      .eq('group_id', groupId)
+      .eq('user_id', currentUserId)
+      .single();
+
+    if (!membership || membership.role !== 'owner') {
+      throw ApiError.forbidden('Only group owner can add members');
+    }
+
+    // If email provided, find user by email
+    let targetUserId = newUserId;
+    if (email && !newUserId) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email)
+        .single();
+
+      if (!profile) {
+        throw ApiError.notFound('User with that email not found');
+      }
+
+      targetUserId = profile.id;
+    }
+
+    // Check if user is already a member
+    const { data: existingMember } = await supabase
+      .from('group_members')
+      .select('id')
+      .eq('group_id', groupId)
+      .eq('user_id', targetUserId)
+      .single();
+
+    if (existingMember) {
+      throw ApiError.badRequest('User is already a member of this group');
+    }
+
+    // Use service role to add member
+    const { createClient } = require('@supabase/supabase-js');
+    
+    const supabaseAdmin = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
+
+    // Add member using admin client
+    const { data: newMember, error } = await supabaseAdmin
+      .from('group_members')
+      .insert({
+        group_id: groupId,
+        user_id: targetUserId,
+        role: 'member'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Failed to add member:', error);
+      throw ApiError.internal('Failed to add member');
+    }
+
+    res.status(201).json({
+      message: 'Member added successfully',
+      member: newMember
+    });
+  } catch (error) {
+    next(error);
   }
+}
 
   /**
    * Remove member from group

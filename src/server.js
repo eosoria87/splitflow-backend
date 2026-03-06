@@ -50,6 +50,10 @@ app.get('/api', (req, res) => {
 const authRoutes = require('./routes/auth.routes');
 app.use('/api/auth', authRoutes);
 
+// Group routes
+const groupRoutes = require('./routes/group.routes');
+app.use('/api/groups', groupRoutes);
+
 // ========================================
 // ERROR HANDLERS
 // ========================================
