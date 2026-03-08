@@ -1,6 +1,7 @@
 const express = require('express');
 const GroupController = require('../controllers/group.controller');
 const AuthMiddleware = require('../middleware/auth.middleware');
+const expenseRoutes = require('./expense.routes');
 
 const router = express.Router();
 
@@ -72,5 +73,16 @@ router.post('/:groupId/members', GroupController.addMember);
  * Only owner can remove members
  */
 router.delete('/:groupId/members/:userId', GroupController.removeMember);
+
+// ========================================
+// NESTED ROUTES - EXPENSES
+// ========================================
+
+/**
+ * Mount expense routes under groups
+ * All expense routes will be accessible at:
+ * /api/groups/:groupId/expenses
+ */
+router.use('/:groupId/expenses', expenseRoutes);
 
 module.exports = router;

@@ -55,33 +55,47 @@ class SupabaseHelper {
   }
 
   /**
-   * Get all members of a group
-   * @param {string} groupId - Group UUID
-   * @returns {Promise<Array>}
-   */
-  static async getGroupMembers(groupId) {
-    const supabaseAdmin = SupabaseHelper.getAdminClient();
+ * Get all members of a group
+ * @param {string} groupId - Group UUID
+ * @param {boolean} includeProfiles - Whether to include profile details (default: true)
+ * @returns {Promise<Array>}
+ */
+static async getGroupMembers(groupId, includeProfiles = true) {
+  const supabaseAdmin = SupabaseHelper.getAdminClient();
 
-    const { data: members, error } = await supabaseAdmin
-      .from('group_members')
-      .select(`
-        user_id,
-        role,
-        joined_at,
-        profiles (
-          name,
-          email
-        )
-      `)
-      .eq('group_id', groupId)
-      .order('joined_at', { ascending: true });
+  // Get group members
+  const { data: members, error } = await supabaseAdmin
+    .from('group_members')
+    .select('user_id, role, joined_at')
+    .eq('group_id', groupId)
+    .order('joined_at', { ascending: true });
 
-    if (error) {
-      throw error;
-    }
+  if (error) {
+    throw error;
+  }
 
+  if (!includeProfiles || !members || members.length === 0) {
     return members || [];
   }
+
+  // Manually fetch profiles for each member
+  const membersWithProfiles = await Promise.all(
+    members.map(async (member) => {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('name, email')
+        .eq('id', member.user_id)
+        .single();
+
+      return {
+        ...member,
+        profiles: profile || null
+      };
+    })
+  );
+
+  return membersWithProfiles;
+}
 }
 
 module.exports = SupabaseHelper;
