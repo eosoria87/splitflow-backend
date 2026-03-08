@@ -3,368 +3,115 @@ const ApiError = require('../utils/ApiError');
 const SupabaseHelper = require('../helpers/supabase.helper');
 
 /**
- * Group Controller
- * Handles all group-related business logic
+ * Expense Controller
+ * Handles all expense-related business logic
  * 
  * SOLID Principles:
- * - Single Responsibility: Only handles group operations
+ * - Single Responsibility: Only handles expense operations
  * - Dependency Inversion: Uses Supabase abstraction
  */
-class GroupController {
-  
+class ExpenseController {
+
   /**
-   * Create a new group
-   * POST /api/groups
+   * Add expense to group
+   * POST /api/groups/:groupId/expenses
    */
-  static async createGroup(req, res, next) {
+  static async addExpense(req, res, next) {
     try {
-      const { name, description, category } = req.body;
+      const { groupId } = req.params;
+      const { description, amount, category, date, splitType = 'equal' } = req.body;
       const userId = req.user.id;
 
       // Validation
-      if (!name || name.trim().length === 0) {
-        throw ApiError.badRequest('Group name is required');
+      if (!description || description.trim().length === 0) {
+        throw ApiError.badRequest('Description is required');
       }
 
-      if (name.length > 100) {
-        throw ApiError.badRequest('Group name must be less than 100 characters');
+      if (!amount || amount <= 0) {
+        throw ApiError.badRequest('Amount must be greater than 0');
       }
 
-      // Optional: Validate category
-      const validCategories = ['trip', 'home', 'couple', 'friends', 'other'];
+      if (amount > 999999.99) {
+        throw ApiError.badRequest('Amount is too large');
+      }
+
+      // Validate category (optional)
+      const validCategories = ['food', 'transport', 'accommodation', 'entertainment', 'utilities', 'other'];
       if (category && !validCategories.includes(category)) {
         throw ApiError.badRequest(`Category must be one of: ${validCategories.join(', ')}`);
       }
 
       const supabaseAdmin = SupabaseHelper.getAdminClient();
 
-      // Create group using admin client
-      const { data: group, error: groupError } = await supabaseAdmin
-        .from('groups')
-        .insert({
-          name: name.trim(),
-          description: description?.trim() || null,
-          category: category || null,
-          created_by: userId
-        })
-        .select()
-        .single();
-
-      if (groupError) {
-        console.error('Group creation error:', groupError);
-        throw ApiError.internal('Failed to create group');
-      }
-
-      // Add creator as owner using admin client
-      const { error: memberError } = await supabaseAdmin
-        .from('group_members')
-        .insert({
-          group_id: group.id,
-          user_id: userId,
-          role: 'owner'
-        });
-
-      if (memberError) {
-        console.error('Failed to add creator as member:', memberError);
-        // Rollback: delete the group
-        await supabaseAdmin.from('groups').delete().eq('id', group.id);
-        throw ApiError.internal('Failed to create group');
-      }
-
-      res.status(201).json({
-        message: 'Group created successfully',
-        group: {
-          id: group.id,
-          name: group.name,
-          description: group.description,
-          category: group.category,
-          created_by: group.created_by,
-          created_at: group.created_at,
-          role: 'owner'
-        }
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  /**
-   * Get all groups for the current user
-   * GET /api/groups
-   */
-  static async getUserGroups(req, res, next) {
-    try {
-      const userId = req.user.id;
-
-      const supabaseAdmin = SupabaseHelper.getAdminClient();
-
-      // Get all groups where user is a member
-      const { data: memberships, error } = await supabaseAdmin
-        .from('group_members')
-        .select(`
-          role,
-          joined_at,
-          groups (
-            id,
-            name,
-            description,
-            category,
-            created_by,
-            created_at,
-            updated_at
-          )
-        `)
-        .eq('user_id', userId)
-        .order('joined_at', { ascending: false });
-
-      if (error) {
-        console.error('Failed to fetch groups:', error);
-        throw ApiError.internal('Failed to fetch groups');
-      }
-
-      // Transform the data
-      const groups = memberships.map(membership => ({
-        id: membership.groups.id,
-        name: membership.groups.name,
-        description: membership.groups.description,
-        category: membership.groups.category,
-        created_by: membership.groups.created_by,
-        created_at: membership.groups.created_at,
-        updated_at: membership.groups.updated_at,
-        role: membership.role,
-        joined_at: membership.joined_at
-      }));
-
-      res.status(200).json({
-        groups,
-        total: groups.length
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  /**
-   * Get a specific group by ID
-   * GET /api/groups/:groupId
-   */
-  static async getGroup(req, res, next) {
-    try {
-      const { groupId } = req.params;
-      const userId = req.user.id;
-
-      const supabaseAdmin = SupabaseHelper.getAdminClient();
-
-      // Get group details
-      const { data: group, error: groupError } = await supabaseAdmin
-        .from('groups')
-        .select('*')
-        .eq('id', groupId)
-        .single();
-
-      if (groupError || !group) {
-        throw ApiError.notFound('Group not found');
-      }
-
-      // Verify user is a member
-      const { isMember, role } = await SupabaseHelper.verifyGroupMembership(groupId, userId);
+      // Verify user is a member of the group
+      const { isMember } = await SupabaseHelper.verifyGroupMembership(groupId, userId);
 
       if (!isMember) {
         throw ApiError.forbidden('You are not a member of this group');
       }
 
-      // Get all members
+      // Get all group members for split calculation
       const members = await SupabaseHelper.getGroupMembers(groupId);
 
-      res.status(200).json({
-        group: {
-          ...group,
-          userRole: role,
-          members: members.map(m => ({
-            user_id: m.user_id,
-            role: m.role,
-            joined_at: m.joined_at,
-            name: m.profiles?.name,
-            email: m.profiles?.email
-          }))
-        }
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  /**
-   * Update group details
-   * PUT /api/groups/:groupId
-   * Only owner can update
-   */
-  static async updateGroup(req, res, next) {
-    try {
-      const { groupId } = req.params;
-      const { name, description, category } = req.body;
-      const userId = req.user.id;
-
-      // Validation
-      if (!name || name.trim().length === 0) {
-        throw ApiError.badRequest('Group name is required');
+      if (!members || members.length === 0) {
+        throw ApiError.internal('Failed to get group members');
       }
 
-      if (name.length > 100) {
-        throw ApiError.badRequest('Group name must be less than 100 characters');
-      }
-
-      // Optional: Validate category
-      const validCategories = ['trip', 'home', 'couple', 'friends', 'other'];
-      if (category && !validCategories.includes(category)) {
-        throw ApiError.badRequest(`Category must be one of: ${validCategories.join(', ')}`);
-      }
-
-      const supabaseAdmin = SupabaseHelper.getAdminClient();
-
-      // Check if user is owner
-      const { isMember, role } = await SupabaseHelper.verifyGroupMembership(groupId, userId);
-
-      if (!isMember || role !== 'owner') {
-        throw ApiError.forbidden('Only group owner can update group details');
-      }
-
-      // Update group
-      const { data: updatedGroup, error } = await supabaseAdmin
-        .from('groups')
-        .update({
-          name: name.trim(),
-          description: description?.trim() || null,
-          category: category || null
-        })
-        .eq('id', groupId)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Failed to update group:', error);
-        throw ApiError.internal('Failed to update group');
-      }
-
-      res.status(200).json({
-        message: 'Group updated successfully',
-        group: updatedGroup
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  /**
-   * Delete a group
-   * DELETE /api/groups/:groupId
-   * Only owner can delete
-   */
-  static async deleteGroup(req, res, next) {
-    try {
-      const { groupId } = req.params;
-      const userId = req.user.id;
-
-      const supabaseAdmin = SupabaseHelper.getAdminClient();
-
-      // Check if user is owner
-      const { isMember, role } = await SupabaseHelper.verifyGroupMembership(groupId, userId);
-
-      if (!isMember || role !== 'owner') {
-        throw ApiError.forbidden('Only group owner can delete the group');
-      }
-
-      // Delete group (cascade will delete group_members)
-      const { error } = await supabaseAdmin
-        .from('groups')
-        .delete()
-        .eq('id', groupId);
-
-      if (error) {
-        console.error('Failed to delete group:', error);
-        throw ApiError.internal('Failed to delete group');
-      }
-
-      res.status(200).json({
-        message: 'Group deleted successfully'
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  /**
-   * Add member to group
-   * POST /api/groups/:groupId/members
-   * Only owner can add members
-   */
-  static async addMember(req, res, next) {
-    try {
-      const { groupId } = req.params;
-      const { userId: newUserId, email } = req.body;
-      const currentUserId = req.user.id;
-
-      // Must provide either userId or email
-      if (!newUserId && !email) {
-        throw ApiError.badRequest('User ID or email is required');
-      }
-
-      const supabaseAdmin = SupabaseHelper.getAdminClient();
-
-      // Check if current user is owner
-      const { isMember, role } = await SupabaseHelper.verifyGroupMembership(groupId, currentUserId);
-
-      if (!isMember || role !== 'owner') {
-        throw ApiError.forbidden('Only group owner can add members');
-      }
-
-      // If email provided, find user by email
-      let targetUserId = newUserId;
-      if (email && !newUserId) {
-        const { data: profile } = await supabaseAdmin
-          .from('profiles')
-          .select('id')
-          .eq('email', email)
-          .single();
-
-        if (!profile) {
-          throw ApiError.notFound('User with that email not found');
-        }
-
-        targetUserId = profile.id;
-      }
-
-      // Check if user is already a member
-      const { data: existingMember } = await supabaseAdmin
-        .from('group_members')
-        .select('id')
-        .eq('group_id', groupId)
-        .eq('user_id', targetUserId)
-        .single();
-
-      if (existingMember) {
-        throw ApiError.badRequest('User is already a member of this group');
-      }
-
-      // Add member using admin client
-      const { data: newMember, error } = await supabaseAdmin
-        .from('group_members')
+      // Create expense
+      const { data: expense, error: expenseError } = await supabaseAdmin
+        .from('expenses')
         .insert({
           group_id: groupId,
-          user_id: targetUserId,
-          role: 'member'
+          description: description.trim(),
+          amount: parseFloat(amount),
+          paid_by: userId,
+          category: category || null,
+          date: date || new Date().toISOString().split('T')[0]
         })
         .select()
         .single();
 
-      if (error) {
-        console.error('Failed to add member:', error);
-        throw ApiError.internal('Failed to add member');
+      if (expenseError) {
+        console.error('Expense creation error:', expenseError);
+        throw ApiError.internal('Failed to create expense');
+      }
+
+      // Calculate equal split
+      const sharePerPerson = parseFloat((amount / members.length).toFixed(2));
+      
+      // Create expense participants (equal split)
+      const participants = members.map(member => ({
+        expense_id: expense.id,
+        user_id: member.user_id,
+        share: sharePerPerson
+      }));
+
+      const { error: participantsError } = await supabaseAdmin
+        .from('expense_participants')
+        .insert(participants);
+
+      if (participantsError) {
+        console.error('Failed to add participants:', participantsError);
+        // Rollback: delete expense
+        await supabaseAdmin.from('expenses').delete().eq('id', expense.id);
+        throw ApiError.internal('Failed to add expense participants');
       }
 
       res.status(201).json({
-        message: 'Member added successfully',
-        member: newMember
+        message: 'Expense added successfully',
+        expense: {
+          id: expense.id,
+          group_id: expense.group_id,
+          description: expense.description,
+          amount: expense.amount,
+          paid_by: expense.paid_by,
+          category: expense.category,
+          date: expense.date,
+          created_at: expense.created_at,
+          split_type: splitType,
+          participants_count: members.length,
+          share_per_person: sharePerPerson
+        }
       });
     } catch (error) {
       next(error);
@@ -372,43 +119,284 @@ class GroupController {
   }
 
   /**
-   * Remove member from group
-   * DELETE /api/groups/:groupId/members/:userId
-   * Only owner can remove members
+   * Get all expenses for a group
+   * GET /api/groups/:groupId/expenses
    */
-  static async removeMember(req, res, next) {
+  static async getGroupExpenses(req, res, next) {
     try {
-      const { groupId, userId: targetUserId } = req.params;
-      const currentUserId = req.user.id;
+      const { groupId } = req.params;
+      const userId = req.user.id;
 
       const supabaseAdmin = SupabaseHelper.getAdminClient();
 
-      // Check if current user is owner
-      const { isMember, role } = await SupabaseHelper.verifyGroupMembership(groupId, currentUserId);
+      // Verify user is a member
+      const { isMember } = await SupabaseHelper.verifyGroupMembership(groupId, userId);
 
-      if (!isMember || role !== 'owner') {
-        throw ApiError.forbidden('Only group owner can remove members');
+      if (!isMember) {
+        throw ApiError.forbidden('You are not a member of this group');
       }
 
-      // Cannot remove yourself (owner)
-      if (targetUserId === currentUserId) {
-        throw ApiError.badRequest('Cannot remove yourself from the group');
-      }
-
-      // Remove member
-      const { error } = await supabaseAdmin
-        .from('group_members')
-        .delete()
+      // Get all expenses with payer info
+      const { data: expenses, error } = await supabaseAdmin
+        .from('expenses')
+        .select(`
+          id,
+          description,
+          amount,
+          paid_by,
+          category,
+          date,
+          created_at,
+          profiles!expenses_paid_by_fkey (
+            name,
+            email
+          )
+        `)
         .eq('group_id', groupId)
-        .eq('user_id', targetUserId);
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Failed to remove member:', error);
-        throw ApiError.internal('Failed to remove member');
+        console.error('Failed to fetch expenses:', error);
+        throw ApiError.internal('Failed to fetch expenses');
+      }
+
+      // Get participants for each expense
+      const expensesWithParticipants = await Promise.all(
+        expenses.map(async (expense) => {
+          const { data: participants } = await supabaseAdmin
+            .from('expense_participants')
+            .select('user_id, share')
+            .eq('expense_id', expense.id);
+
+          return {
+            id: expense.id,
+            description: expense.description,
+            amount: parseFloat(expense.amount),
+            paid_by: expense.paid_by,
+            payer_name: expense.profiles?.name,
+            payer_email: expense.profiles?.email,
+            category: expense.category,
+            date: expense.date,
+            created_at: expense.created_at,
+            participants: participants || [],
+            participants_count: participants?.length || 0
+          };
+        })
+      );
+
+      res.status(200).json({
+        expenses: expensesWithParticipants,
+        total: expensesWithParticipants.length
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Get specific expense details
+   * GET /api/groups/:groupId/expenses/:expenseId
+   */
+  static async getExpense(req, res, next) {
+    try {
+      const { groupId, expenseId } = req.params;
+      const userId = req.user.id;
+
+      const supabaseAdmin = SupabaseHelper.getAdminClient();
+
+      // Verify user is a member
+      const { isMember } = await SupabaseHelper.verifyGroupMembership(groupId, userId);
+
+      if (!isMember) {
+        throw ApiError.forbidden('You are not a member of this group');
+      }
+
+      // Get expense
+      const { data: expense, error: expenseError } = await supabaseAdmin
+        .from('expenses')
+        .select(`
+          *,
+          profiles!expenses_paid_by_fkey (
+            name,
+            email
+          )
+        `)
+        .eq('id', expenseId)
+        .eq('group_id', groupId)
+        .single();
+
+      if (expenseError || !expense) {
+        throw ApiError.notFound('Expense not found');
+      }
+
+      // Get participants with user details
+      const { data: participants } = await supabaseAdmin
+        .from('expense_participants')
+        .select(`
+          user_id,
+          share,
+          profiles (
+            name,
+            email
+          )
+        `)
+        .eq('expense_id', expenseId);
+
+      res.status(200).json({
+        expense: {
+          id: expense.id,
+          group_id: expense.group_id,
+          description: expense.description,
+          amount: parseFloat(expense.amount),
+          paid_by: expense.paid_by,
+          payer_name: expense.profiles?.name,
+          payer_email: expense.profiles?.email,
+          category: expense.category,
+          date: expense.date,
+          created_at: expense.created_at,
+          updated_at: expense.updated_at,
+          participants: participants?.map(p => ({
+            user_id: p.user_id,
+            share: parseFloat(p.share),
+            name: p.profiles?.name,
+            email: p.profiles?.email
+          })) || []
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Update expense
+   * PUT /api/groups/:groupId/expenses/:expenseId
+   * Only the person who paid can update
+   */
+  static async updateExpense(req, res, next) {
+    try {
+      const { groupId, expenseId } = req.params;
+      const { description, amount, category, date } = req.body;
+      const userId = req.user.id;
+
+      // Validation
+      if (description && description.trim().length === 0) {
+        throw ApiError.badRequest('Description cannot be empty');
+      }
+
+      if (amount !== undefined && amount <= 0) {
+        throw ApiError.badRequest('Amount must be greater than 0');
+      }
+
+      const supabaseAdmin = SupabaseHelper.getAdminClient();
+
+      // Get expense and verify ownership
+      const { data: expense } = await supabaseAdmin
+        .from('expenses')
+        .select('paid_by, group_id')
+        .eq('id', expenseId)
+        .single();
+
+      if (!expense) {
+        throw ApiError.notFound('Expense not found');
+      }
+
+      if (expense.group_id !== groupId) {
+        throw ApiError.badRequest('Expense does not belong to this group');
+      }
+
+      if (expense.paid_by !== userId) {
+        throw ApiError.forbidden('Only the person who paid can update this expense');
+      }
+
+      // Update expense
+      const updateData = {};
+      if (description) updateData.description = description.trim();
+      if (amount) updateData.amount = parseFloat(amount);
+      if (category !== undefined) updateData.category = category || null;
+      if (date) updateData.date = date;
+
+      const { data: updatedExpense, error } = await supabaseAdmin
+        .from('expenses')
+        .update(updateData)
+        .eq('id', expenseId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Failed to update expense:', error);
+        throw ApiError.internal('Failed to update expense');
+      }
+
+      // If amount changed, update participants' shares
+      if (amount) {
+        const { data: participants } = await supabaseAdmin
+          .from('expense_participants')
+          .select('user_id')
+          .eq('expense_id', expenseId);
+
+        const newSharePerPerson = parseFloat((amount / participants.length).toFixed(2));
+
+        await supabaseAdmin
+          .from('expense_participants')
+          .update({ share: newSharePerPerson })
+          .eq('expense_id', expenseId);
       }
 
       res.status(200).json({
-        message: 'Member removed successfully'
+        message: 'Expense updated successfully',
+        expense: updatedExpense
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Delete expense
+   * DELETE /api/groups/:groupId/expenses/:expenseId
+   * Only the person who paid can delete
+   */
+  static async deleteExpense(req, res, next) {
+    try {
+      const { groupId, expenseId } = req.params;
+      const userId = req.user.id;
+
+      const supabaseAdmin = SupabaseHelper.getAdminClient();
+
+      // Get expense and verify ownership
+      const { data: expense } = await supabaseAdmin
+        .from('expenses')
+        .select('paid_by, group_id')
+        .eq('id', expenseId)
+        .single();
+
+      if (!expense) {
+        throw ApiError.notFound('Expense not found');
+      }
+
+      if (expense.group_id !== groupId) {
+        throw ApiError.badRequest('Expense does not belong to this group');
+      }
+
+      if (expense.paid_by !== userId) {
+        throw ApiError.forbidden('Only the person who paid can delete this expense');
+      }
+
+      // Delete expense (cascade will delete participants)
+      const { error } = await supabaseAdmin
+        .from('expenses')
+        .delete()
+        .eq('id', expenseId);
+
+      if (error) {
+        console.error('Failed to delete expense:', error);
+        throw ApiError.internal('Failed to delete expense');
+      }
+
+      res.status(200).json({
+        message: 'Expense deleted successfully'
       });
     } catch (error) {
       next(error);
@@ -416,4 +404,4 @@ class GroupController {
   }
 }
 
-module.exports = GroupController;
+module.exports = ExpenseController;
