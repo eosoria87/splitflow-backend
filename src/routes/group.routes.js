@@ -2,6 +2,7 @@ const express = require('express');
 const GroupController = require('../controllers/group.controller');
 const AuthMiddleware = require('../middleware/auth.middleware');
 const expenseRoutes = require('./expense.routes');
+const balanceRoutes = require('./balance.routes');
 
 const router = express.Router();
 
@@ -84,5 +85,17 @@ router.delete('/:groupId/members/:userId', GroupController.removeMember);
  * /api/groups/:groupId/expenses
  */
 router.use('/:groupId/expenses', expenseRoutes);
+
+// ========================================
+// NESTED ROUTES - BALANCES & SETTLEMENTS
+// ========================================
+
+/**
+ * Mount balance/settlement routes under groups
+ * Routes will be accessible at:
+ * /api/groups/:groupId/balances
+ * /api/groups/:groupId/settlements
+ */
+router.use('/:groupId', balanceRoutes);
 
 module.exports = router;
