@@ -21,7 +21,8 @@ const createSupabaseClient = () => {
     {
       auth: {
         autoRefreshToken: true,
-        persistSession: false, // Server-side doesn't need session persistence
+        persistSession: false,
+        flowType: 'pkce',
       }
     }
   );

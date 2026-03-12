@@ -17,6 +17,8 @@ const router = express.Router();
 router.post('/signup', AuthController.signup);
 router.post('/login', AuthController.login);
 router.post('/refresh', AuthController.refreshToken);
+router.get('/google', AuthController.googleAuth);
+router.get('/callback', AuthController.googleCallback);
 
 // Protected routes (authentication required)
 router.get('/me', AuthMiddleware.verifyToken, AuthController.getCurrentUser);

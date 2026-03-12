@@ -149,6 +149,54 @@ class AuthController {
   }
 
   /**
+   * Initiate Google OAuth (PKCE flow)
+   * GET /api/auth/google
+   */
+  static async googleAuth(_req, res, next) {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${process.env.BACKEND_URL}/api/auth/callback`,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) throw ApiError.internal(error.message);
+
+      res.json({ url: data.url });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Handle Google OAuth callback (PKCE code exchange)
+   * GET /api/auth/callback
+   */
+  static async googleCallback(req, res, next) {
+    try {
+      const { code } = req.query;
+
+      if (!code) throw ApiError.badRequest('Missing code parameter');
+
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+      if (error) throw ApiError.unauthorized(error.message);
+
+      const params = new URLSearchParams({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        expires_at: String(data.session.expires_at),
+      });
+
+      res.redirect(`${process.env.FRONTEND_URL}/auth/callback?${params}`);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Refresh access token
    * POST /api/auth/refresh
    */
