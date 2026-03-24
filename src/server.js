@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./config/swagger');
 require('dotenv').config();
 
 const app = express();
@@ -45,6 +47,9 @@ app.get('/api', (req, res) => {
     version: '1.0.0'
   });
 });
+
+// Swagger docs (all environments)
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Auth routes
 const authRoutes = require('./routes/auth.routes');
