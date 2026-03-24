@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 require('dotenv').config();
 
@@ -48,8 +47,38 @@ app.get('/api', (req, res) => {
   });
 });
 
-// Swagger docs (all environments)
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Swagger: spec JSON
+app.get('/api/docs/swagger.json', (req, res) => {
+  res.json(swaggerSpec);
+});
+
+// Swagger: UI via CDN (works in Vercel serverless)
+app.get('/api/docs', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html>
+  <head>
+    <title>SplitFlow API Docs</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+    <script>
+      window.onload = function() {
+        SwaggerUIBundle({
+          url: '/api/docs/swagger.json',
+          dom_id: '#swagger-ui',
+          presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+          layout: 'StandaloneLayout'
+        });
+      }
+    </script>
+  </body>
+</html>`);
+});
 
 // Auth routes
 const authRoutes = require('./routes/auth.routes');
