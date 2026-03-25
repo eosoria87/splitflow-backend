@@ -149,6 +149,28 @@ class AuthController {
   }
 
   /**
+   * Generate Google OAuth URL
+   * GET /api/auth/google
+   */
+  static async googleAuth(_req, res, next) {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${process.env.FRONTEND_URL}/auth/callback`,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) throw ApiError.internal(error.message);
+
+      res.status(200).json({ url: data.url });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Refresh access token
    * POST /api/auth/refresh
    */
